@@ -15,23 +15,27 @@ void scan_seq(long* prefix_sum, const long* A, long n) {
   }
 }
 
+// Break A array into parts, work on one part in one thread
+// when all threads are done working on their part of A,
+// calculate offset to be added by adding up precomputed
+// local_prefix entries of all previous threads.
+// Works because static scheduling and no. of parts = no. of threads
 void scan_omp(long* prefix_sum, const long* A, long n) {
   // TODO: implement multi-threaded OpenMP scan
   if(n == 0) return;
   
   int tid, nthreads, part_length;
-  // long s = 0;
   prefix_sum[0] = 0;
   long* local_prefix;
 
   #pragma omp parallel private(tid)
   {
 
+    // all threads wait at the end of single block
     #pragma omp single
     {
       nthreads = omp_get_num_threads();
       printf("Number of threads = %d\n", nthreads);
-      // part_length = n % nthreads ? (n / nthreads) + 1 : n / nthreads;
       part_length = ceil(n / (double) nthreads);
       printf("Part length = %d\n", part_length);
       local_prefix = new long[nthreads+1];
@@ -40,7 +44,7 @@ void scan_omp(long* prefix_sum, const long* A, long n) {
 
     tid = omp_get_thread_num();
 
-    long local_sum = 0;
+    // operate on parts of A
     #pragma omp for schedule(static, 1) nowait
     for(int t = 0; t < nthreads; t++) {
       long base = t*part_length;
@@ -53,11 +57,13 @@ void scan_omp(long* prefix_sum, const long* A, long n) {
 
     #pragma omp barrier
 
+    // update local copy of offset to be added
     long offset = 0;
     for(int t = 0; t <= tid; t++)
       offset += local_prefix[t];
 
-    #pragma omp for schedule(static)
+    // add offset to get final value
+    #pragma omp for schedule(static, 1) nowait
     for(int t = 0; t < nthreads; t++) {
       long base = t*part_length;
       long limit = MIN(n, base + part_length);
@@ -85,20 +91,17 @@ int main() {
   long* B0 = (long*) malloc(N * sizeof(long));
   long* B1 = (long*) malloc(N * sizeof(long));
   for (long i = 0; i < N; i++) A[i] = rand();
-  // for (long i = 0; i < N; i++) A[i] = i + 1;
-  // print_result(A, N);
 
   double tt = omp_get_wtime(), st, pt;
   scan_seq(B0, A, N);
   st = omp_get_wtime() - tt;
   printf("sequential-scan = %fs\n", st);
-  // print_result(B0, N);
 
   tt = omp_get_wtime();
   scan_omp(B1, A, N);
   pt = omp_get_wtime() - tt;
   printf("parallel-scan   = %fs\n", pt);
-  // print_result(B1, N);
+
   long err = 0;
   for (long i = 0; i < N; i++) err = std::max(err, std::abs(B0[i] - B1[i]));
   printf("error = %ld\n", err);
